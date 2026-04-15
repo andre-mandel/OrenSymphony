@@ -1,3 +1,4 @@
+import type { PayloadHandler } from 'payload'
 import { buildConfig } from 'payload'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 
@@ -7,6 +8,7 @@ import { Workspaces } from './collections/Workspaces'
 import { Pipelines } from './collections/Pipelines'
 import { Connectors } from './collections/Connectors'
 import { PipelineRuns } from './collections/PipelineRuns'
+import { Plans } from './collections/Plans'
 
 export default buildConfig({
   secret: process.env.PAYLOAD_SECRET || 'dev-secret-change-me',
@@ -14,7 +16,7 @@ export default buildConfig({
   admin: {
     user: 'users',
   },
-  collections: [Users, Orgs, Workspaces, Pipelines, Connectors, PipelineRuns],
+  collections: [Users, Orgs, Workspaces, Plans, Pipelines, Connectors, PipelineRuns],
   db: postgresAdapter({
     pool: {
       connectionString: process.env.DATABASE_URL || 'postgres://postgres:postgres@localhost:5432/orensymphony',
@@ -25,5 +27,6 @@ export default buildConfig({
   typescript: {
     outputFile: 'src/payload-types.ts',
   },
+  // Custom REST routes are mounted in `src/server.ts` (Express).
 })
 

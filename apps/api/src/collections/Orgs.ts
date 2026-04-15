@@ -20,6 +20,23 @@ export const Orgs: CollectionConfig = {
       unique: true,
     },
     {
+      name: 'plan',
+      type: 'relationship',
+      relationTo: 'plans',
+      required: true,
+      admin: {
+        description: 'Subscription tier for this org (used for server-side limits).',
+      },
+    },
+    {
+      name: 'stripeCustomerId',
+      type: 'text',
+      index: true,
+      admin: {
+        description: 'Stripe customer id (set via billing webhook).',
+      },
+    },
+    {
       name: 'members',
       type: 'array',
       fields: [
