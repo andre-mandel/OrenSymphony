@@ -4,6 +4,7 @@ import cookieParser from 'cookie-parser';
 import payload from 'payload';
 import config from './payload.config.js';
 import { getStripe } from './billing/stripe.js'
+import { evaluateRunAgainstPolicies } from './governance/policy.js'
 
 const app = express();
 
@@ -80,6 +81,39 @@ async function start() {
     } catch (e: any) {
       payload.logger.error(e)
       return res.status(400).send(`Webhook Error: ${e?.message ?? 'unknown'}`)
+    }
+  })
+
+  // Governance: approve a pending run (created when policy outcome is require_approval).
+  // Note: Proper auth/RBAC middleware should be added here before production use.
+  app.post('/api/governance/runs/:id/approve', async (req, res) => {
+    try {
+      const runId = String(req.params.id)
+      const run = await payload.findByID({ collection: 'pipelineRuns', id: runId, depth: 1 })
+      if (!run) return res.status(404).json({ error: 'Run not found' })
+      if ((run as any).status !== 'needs_approval') return res.status(400).json({ error: 'Run is not awaiting approval' })
+
+      const updated = await payload.update({
+        collection: 'pipelineRuns',
+        id: runId,
+        data: { status: 'queued', approval: { status: 'approved', approvedBy: null, approvedAt: new Date().toISOString() } } as any,
+      })
+
+      await payload.create({
+        collection: 'auditEvents',
+        data: {
+          org: (run as any).org,
+          actor: null,
+          action: 'governance.run.approved',
+          resourceType: 'pipelineRuns',
+          resourceId: runId,
+        },
+      })
+
+      return res.json({ ok: true, run: updated })
+    } catch (e: any) {
+      payload.logger.error(e)
+      return res.status(500).json({ error: e?.message ?? 'unknown' })
     }
   })
 

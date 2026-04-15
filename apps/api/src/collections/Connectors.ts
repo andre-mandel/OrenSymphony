@@ -1,5 +1,7 @@
 import type { AccessArgs, CollectionConfig } from 'payload';
 
+const isAuthenticated = ({ req }: AccessArgs) => Boolean(req.user)
+
 export const Connectors: CollectionConfig = {
   slug: 'connectors',
   admin: {
@@ -7,10 +9,10 @@ export const Connectors: CollectionConfig = {
     defaultColumns: ['name', 'kind', 'provider', 'org', 'updatedAt'],
   },
   access: {
-    read: ({ req }: AccessArgs) => Boolean(req.user),
-    create: ({ req }: AccessArgs) => Boolean(req.user),
-    update: ({ req }: AccessArgs) => Boolean(req.user),
-    delete: ({ req }: AccessArgs) => Boolean(req.user),
+    read: isAuthenticated,
+    create: isAuthenticated,
+    update: isAuthenticated,
+    delete: isAuthenticated,
   },
   fields: [
     {
@@ -60,6 +62,14 @@ export const Connectors: CollectionConfig = {
       admin: {
         description:
           'Reference to a secret (e.g. ENV var name). Never store raw secret values here.',
+      },
+    },
+    {
+      name: 'approved',
+      type: 'checkbox',
+      defaultValue: false,
+      admin: {
+        description: 'If governance requires approval for new connectors, unapproved connectors cannot be used in runs.',
       },
     },
   ],

@@ -9,6 +9,8 @@ import { Pipelines } from './collections/Pipelines'
 import { Connectors } from './collections/Connectors'
 import { PipelineRuns } from './collections/PipelineRuns'
 import { Plans } from './collections/Plans'
+import { Policies } from './collections/Policies'
+import { AuditEvents } from './collections/AuditEvents'
 
 export default buildConfig({
   secret: process.env.PAYLOAD_SECRET || 'dev-secret-change-me',
@@ -16,7 +18,7 @@ export default buildConfig({
   admin: {
     user: 'users',
   },
-  collections: [Users, Orgs, Workspaces, Plans, Pipelines, Connectors, PipelineRuns],
+  collections: [Users, Orgs, Workspaces, Plans, Policies, AuditEvents, Pipelines, Connectors, PipelineRuns],
   db: postgresAdapter({
     pool: {
       connectionString: process.env.DATABASE_URL || 'postgres://postgres:postgres@localhost:5432/orensymphony',

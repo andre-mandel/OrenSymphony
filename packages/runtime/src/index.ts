@@ -34,11 +34,14 @@ export type RuntimeEvent =
   | { type: 'node.started'; runId: string; nodeId: NodeId; at: string }
   | { type: 'node.completed'; runId: string; nodeId: NodeId; at: string; output?: unknown }
   | { type: 'node.failed'; runId: string; nodeId: NodeId; at: string; error: { message: string } }
+  | { type: 'run.paused'; runId: string; at: string; reason: 'approval_required'; approvalId: string }
+  | { type: 'run.resumed'; runId: string; at: string; approvalId: string }
   | { type: 'run.completed'; runId: string; at: string; status: Exclude<RunStatus, 'queued' | 'running'> }
 
 export interface RuntimeOptions {
   timeoutMs?: number
   maxRetries?: number
+  policy?: RuntimePolicy
 }
 
 export interface NodeExecutorContext {
@@ -57,6 +60,17 @@ export interface RuntimeRegistry {
   getExecutor: (nodeType: string) => NodeExecutor | undefined
 }
 
+export interface RuntimePolicyDecision {
+  decision: 'allow' | 'deny' | 'require_approval'
+  reason?: string
+  approvalId?: string
+}
+
+export interface RuntimePolicy {
+  evaluateNode: (args: { runId: string; node: PipelineNode; input: unknown }) => Promise<RuntimePolicyDecision> | RuntimePolicyDecision
+  waitForApproval?: (args: { runId: string; approvalId: string; signal: AbortSignal }) => Promise<void>
+}
+
 function nowIso() {
   return new Date().toISOString()
 }
@@ -70,6 +84,9 @@ export class WorkflowRuntime {
     this.opts = {
       timeoutMs: opts.timeoutMs ?? 60_000,
       maxRetries: opts.maxRetries ?? 0,
+      policy: opts.policy ?? {
+        evaluateNode: () => ({ decision: 'allow' as const }),
+      },
     }
   }
 
@@ -139,6 +156,22 @@ export class WorkflowRuntime {
           const inputObj: Record<string, unknown> = {}
           for (const e of upstream) {
             inputObj[e.source] = outputs.get(e.source)
+          }
+
+          const policyDecision = await this.opts.policy.evaluateNode({
+            runId: args.runId,
+            node,
+            input: upstream.length ? inputObj : (args.input ?? null),
+          })
+          if (policyDecision.decision === 'deny') {
+            throw new Error(policyDecision.reason || 'Denied by policy')
+          }
+          if (policyDecision.decision === 'require_approval') {
+            const approvalId = policyDecision.approvalId || `approval_${args.runId}_${nodeId}`
+            emit({ type: 'run.paused', runId: args.runId, at: nowIso(), reason: 'approval_required', approvalId })
+            if (!this.opts.policy.waitForApproval) throw new Error('Approval required but no waitForApproval handler configured')
+            await this.opts.policy.waitForApproval({ runId: args.runId, approvalId, signal: abortSignal })
+            emit({ type: 'run.resumed', runId: args.runId, at: nowIso(), approvalId })
           }
 
           const out = await withRetries(
