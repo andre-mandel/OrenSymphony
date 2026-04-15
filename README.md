@@ -18,3 +18,12 @@ View your app in AI Studio: https://ai.studio/apps/001ed859-97d0-4c0d-bfed-fd777
 2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
 3. Run the app:
    `npm run dev`
+
+## Pricing (initial)
+
+- **Free**: 1 seat, 1 workspace, limited runs/month, community connectors, short history
+- **Pro (Solo)**: 1 seat, higher limits, private connectors, longer history
+- **Team**: multi-seat, real-time collaboration, RBAC, shared connectors, audit-lite
+- **Business/Enterprise**: SSO/SAML, advanced audit/retention, policy controls, dedicated capacity, self-host option
+
+Metering dimensions: **seats**, **runs**, and **usage** (tokens/cost passthrough + margin).
