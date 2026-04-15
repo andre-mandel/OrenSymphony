@@ -1,0 +1,21 @@
+{
+  "name": "@orensymphony/collab",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@y/websocket-server": "^0.1.5",
+    "http": "^0.0.1-security",
+    "lib0": "^0.2.102",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0",
+    "typescript": "5.8.3",
+    "@types/ws": "^8.18.1"
+  }
+}

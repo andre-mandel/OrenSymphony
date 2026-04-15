@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -21,6 +21,7 @@ import { ModelNode } from './components/nodes/ModelNode';
 import { InputNode } from './components/nodes/InputNode';
 import { OutputNode } from './components/nodes/OutputNode';
 import { generatePipeline, executeTextModel, generateImage } from './lib/gemini';
+import { useCollabGraph } from './lib/collab';
 
 const nodeTypes = {
   modelNode: ModelNode,
@@ -60,10 +61,31 @@ const initialEdges: Edge[] = [
 
 function Orchestrator() {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
-  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+  const { yNodes, yEdges, setYNodes, setYEdges } = useCollabGraph({
+    room: 'default',
+    initial: { nodes: initialNodes, edges: initialEdges },
+  });
+
+  const [nodes, setNodes, onNodesChange] = useNodesState(yNodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(yEdges);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
+
+  // Pull remote updates into local state.
+  useEffect(() => {
+    setNodes(yNodes);
+  }, [yNodes, setNodes]);
+  useEffect(() => {
+    setEdges(yEdges);
+  }, [yEdges, setEdges]);
+
+  // Push local updates to shared doc.
+  useEffect(() => {
+    setYNodes(nodes);
+  }, [nodes, setYNodes]);
+  useEffect(() => {
+    setYEdges(edges);
+  }, [edges, setYEdges]);
 
   const onConnect = useCallback(
     (params: Connection | Edge) => setEdges((eds) => addEdge({ ...params, animated: true, style: { stroke: '#6366f1' } } as Edge, eds)),

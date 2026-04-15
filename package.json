@@ -13,5 +13,8 @@
   "workspaces": [
     "apps/*",
     "packages/*"
-  ]
+  ],
+  "devDependencies": {
+    "playwright": "^1.59.1"
+  }
 }
