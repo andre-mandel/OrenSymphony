@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -9,18 +9,28 @@ import {
   Background,
   Connection,
   Edge,
-  Node
+  Node,
+  MiniMap,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { v4 as uuidv4 } from 'uuid';
 
 import { TopBar } from './components/TopBar';
 import { Sidebar } from './components/Sidebar';
-import { ChatPanel } from './components/ChatPanel';
+import { SidePanel } from './components/SidePanel';
+import { ToastStack, type ToastMessage, type ToastTone } from './components/Toast';
 import { ModelNode } from './components/nodes/ModelNode';
 import { InputNode } from './components/nodes/InputNode';
 import { OutputNode } from './components/nodes/OutputNode';
-import { generatePipeline, executeTextModel, generateImage } from './lib/gemini';
+import { generatePipeline, HAS_API_KEY } from './lib/gemini';
+import { runPipeline, type RunStatus } from './lib/pipeline';
+import {
+  persistPipeline,
+  loadPersistedPipeline,
+  clearPersistedPipeline,
+  downloadPipeline,
+  readPipelineFile,
+} from './lib/storage';
 
 const nodeTypes = {
   modelNode: ModelNode,
@@ -39,10 +49,10 @@ const initialNodes: Node[] = [
     id: 'model-1',
     type: 'modelNode',
     position: { x: 350, y: 200 },
-    data: { 
-      label: 'Story Writer', 
+    data: {
+      label: 'Story Writer',
       model: 'gemini-3.1-pro-preview',
-      prompt: 'You are a creative writer. Write a 2 paragraph story based on the input.'
+      prompt: 'You are a creative writer. Write a 2-paragraph story based on the input.',
     },
   },
   {
@@ -50,7 +60,7 @@ const initialNodes: Node[] = [
     type: 'outputNode',
     position: { x: 700, y: 200 },
     data: { result: '' },
-  }
+  },
 ];
 
 const initialEdges: Edge[] = [
@@ -58,15 +68,57 @@ const initialEdges: Edge[] = [
   { id: 'e2-3', source: 'model-1', target: 'output-1', animated: true, style: { stroke: '#6366f1' } },
 ];
 
+const DEFAULT_PROMPTS: Record<string, string> = {
+  inputNode: '',
+  outputNode: '',
+  modelNode: 'Process the input data.',
+};
+
 function Orchestrator() {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const [hydrated, setHydrated] = useState(false);
+
+  const pushToast = useCallback((text: string, tone: ToastTone = 'info') => {
+    setToasts(prev => [...prev, { id: uuidv4(), text, tone }]);
+  }, []);
+  const dismissToast = useCallback((id: string) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  }, []);
+
+  // Hydrate from localStorage once.
+  useEffect(() => {
+    const saved = loadPersistedPipeline();
+    if (saved && saved.nodes.length > 0) {
+      setNodes(saved.nodes);
+      setEdges(saved.edges);
+      pushToast('Restored your last pipeline from this browser.', 'info');
+    }
+    if (!HAS_API_KEY) {
+      pushToast(
+        'GEMINI_API_KEY is not set. Add it to .env.local and restart `npm run dev` to enable model calls.',
+        'error',
+      );
+    }
+    setHydrated(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Auto-persist after hydration.
+  useEffect(() => {
+    if (!hydrated) return;
+    const handle = setTimeout(() => persistPipeline(nodes, edges), 300);
+    return () => clearTimeout(handle);
+  }, [nodes, edges, hydrated]);
 
   const onConnect = useCallback(
-    (params: Connection | Edge) => setEdges((eds) => addEdge({ ...params, animated: true, style: { stroke: '#6366f1' } } as Edge, eds)),
+    (params: Connection | Edge) =>
+      setEdges(eds => addEdge({ ...params, animated: true, style: { stroke: '#6366f1' } } as Edge, eds)),
     [setEdges],
   );
 
@@ -78,14 +130,10 @@ function Orchestrator() {
   const onDrop = useCallback(
     (event: React.DragEvent) => {
       event.preventDefault();
-
       const type = event.dataTransfer.getData('application/reactflow');
       const modelId = event.dataTransfer.getData('modelId');
       const modelName = event.dataTransfer.getData('modelName');
-
-      if (typeof type === 'undefined' || !type) {
-        return;
-      }
+      if (!type) return;
 
       const reactFlowBounds = reactFlowWrapper.current?.getBoundingClientRect();
       if (!reactFlowBounds) return;
@@ -95,18 +143,22 @@ function Orchestrator() {
         y: event.clientY - reactFlowBounds.top,
       };
 
-      const newNode: Node = {
-        id: uuidv4(),
-        type,
-        position,
-        data: { 
-          label: modelName || 'New Node',
-          model: modelId,
-          prompt: 'Process the input data.'
-        },
-      };
+      let data: Record<string, unknown>;
+      if (type === 'inputNode') {
+        data = { value: '' };
+      } else if (type === 'outputNode') {
+        data = { result: '' };
+      } else {
+        data = {
+          label: modelName || 'New Step',
+          model: modelId || 'gemini-3-flash-preview',
+          prompt: DEFAULT_PROMPTS[type] ?? '',
+        };
+      }
 
-      setNodes((nds) => nds.concat(newNode));
+      const newNode: Node = { id: uuidv4(), type, position, data };
+      setNodes(nds => nds.concat(newNode));
+      setSelectedNodeId(newNode.id);
     },
     [setNodes],
   );
@@ -115,87 +167,124 @@ function Orchestrator() {
     setIsGenerating(true);
     try {
       const pipeline = await generatePipeline(prompt);
-      if (pipeline.nodes && pipeline.nodes.length > 0) {
-        // Map the generated nodes to our node format
-        const newNodes = pipeline.nodes.map(n => ({
-          ...n,
-          id: n.id || uuidv4(),
-          type: n.type || 'modelNode',
-          position: n.position || { x: Math.random() * 500, y: Math.random() * 500 },
-          data: {
-            ...n.data,
-            status: 'idle'
-          }
-        }));
-        
-        const newEdges = (pipeline.edges || []).map(e => ({
-          ...e,
-          id: e.id || uuidv4(),
-          animated: true,
-          style: { stroke: '#6366f1' }
-        }));
-
-        setNodes(newNodes);
-        setEdges(newEdges);
+      if (!pipeline.nodes || pipeline.nodes.length === 0) {
+        pushToast('Generator returned an empty pipeline. Try rephrasing the request.', 'error');
+        return;
       }
-    } catch (error) {
-      console.error("Failed to auto-orchestrate", error);
+      const newNodes: Node[] = pipeline.nodes.map(n => ({
+        id: n.id || uuidv4(),
+        type: n.type || 'modelNode',
+        position: n.position || { x: Math.random() * 500, y: Math.random() * 500 },
+        data: { ...n.data, status: 'idle' },
+      }));
+      const newEdges: Edge[] = (pipeline.edges || []).map(e => ({
+        id: e.id || uuidv4(),
+        source: e.source,
+        target: e.target,
+        animated: true,
+        style: { stroke: '#6366f1' },
+      }));
+      setNodes(newNodes);
+      setEdges(newEdges);
+      setSelectedNodeId(null);
+      pushToast(`Generated a pipeline with ${newNodes.length} nodes.`, 'success');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to auto-orchestrate.';
+      pushToast(message, 'error');
     } finally {
       setIsGenerating(false);
     }
   };
 
-  const runPipeline = async () => {
-    if (isRunning) return;
-    setIsRunning(true);
-    
-    // Reset statuses
-    setNodes(nds => nds.map(n => ({ ...n, data: { ...n.data, status: 'idle', result: '' } })));
+  const patchNode = useCallback((id: string, patch: Record<string, unknown>) => {
+    setNodes(nds =>
+      nds.map(n => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n)),
+    );
+  }, [setNodes]);
 
-    // Simple execution engine (assumes linear or simple DAG)
-    // Find input node
-    const inputNode = nodes.find(n => n.type === 'inputNode');
-    if (!inputNode) {
-      setIsRunning(false);
+  const deleteNode = useCallback((id: string) => {
+    setNodes(nds => nds.filter(n => n.id !== id));
+    setEdges(eds => eds.filter(e => e.source !== id && e.target !== id));
+    setSelectedNodeId(prev => (prev === id ? null : prev));
+  }, [setNodes, setEdges]);
+
+  const selectedNode = useMemo(
+    () => nodes.find(n => n.id === selectedNodeId) ?? null,
+    [nodes, selectedNodeId],
+  );
+
+  const handleClear = useCallback(() => {
+    if (!confirm('Clear the entire canvas? This will also remove the saved pipeline in this browser.')) return;
+    setNodes([]);
+    setEdges([]);
+    setSelectedNodeId(null);
+    clearPersistedPipeline();
+    pushToast('Canvas cleared.', 'info');
+  }, [setNodes, setEdges, pushToast]);
+
+  const handleSave = useCallback(() => {
+    persistPipeline(nodes, edges);
+    pushToast('Pipeline saved to this browser.', 'success');
+  }, [nodes, edges, pushToast]);
+
+  const handleExport = useCallback(() => {
+    if (nodes.length === 0) {
+      pushToast('Nothing to export — add some nodes first.', 'error');
       return;
     }
+    downloadPipeline(nodes, edges);
+    pushToast('Pipeline exported as JSON.', 'success');
+  }, [nodes, edges, pushToast]);
 
-    let currentData: string = (inputNode.data.value as string) || '';
-    let currentNodeId = inputNode.id;
+  const handleImport = useCallback(async (file: File) => {
+    const data = await readPipelineFile(file);
+    if (!data) {
+      pushToast('Could not parse that file. Expected JSON with nodes/edges.', 'error');
+      return;
+    }
+    setNodes(data.nodes);
+    setEdges(data.edges);
+    setSelectedNodeId(null);
+    pushToast(`Imported pipeline with ${data.nodes.length} nodes.`, 'success');
+  }, [setNodes, setEdges, pushToast]);
+
+  const runPipelineHandler = async () => {
+    if (isRunning) return;
+    setIsRunning(true);
+
+    // Reset volatile state.
+    setNodes(nds =>
+      nds.map(n => {
+        if (n.type === 'modelNode') {
+          return { ...n, data: { ...n.data, status: 'idle' as RunStatus, result: '', error: undefined } };
+        }
+        if (n.type === 'outputNode') {
+          return { ...n, data: { ...n.data, result: '' } };
+        }
+        return n;
+      }),
+    );
 
     try {
-      while (true) {
-        // Find next edge
-        const nextEdge = edges.find(e => e.source === currentNodeId);
-        if (!nextEdge) break;
-
-        const nextNode = nodes.find(n => n.id === nextEdge.target);
-        if (!nextNode) break;
-
-        if (nextNode.type === 'modelNode') {
-          // Update status to running
-          setNodes(nds => nds.map(n => n.id === nextNode.id ? { ...n, data: { ...n.data, status: 'running' } } : n));
-          
-          let result = '';
-          const nodeData = nextNode.data as any;
-          if (nodeData.model === 'gemini-3.1-flash-image-preview') {
-            result = await generateImage(nodeData.prompt + " " + currentData) || '';
-          } else {
-            result = await executeTextModel(nodeData.model, nodeData.prompt, currentData);
-          }
-          
-          currentData = result;
-          
-          // Update status to completed
-          setNodes(nds => nds.map(n => n.id === nextNode.id ? { ...n, data: { ...n.data, status: 'completed' } } : n));
-        } else if (nextNode.type === 'outputNode') {
-          setNodes(nds => nds.map(n => n.id === nextNode.id ? { ...n, data: { ...n.data, result: currentData } } : n));
-        }
-
-        currentNodeId = nextNode.id;
-      }
-    } catch (error) {
-      console.error("Pipeline execution failed", error);
+      const snapshot = nodes.map(n => ({ ...n, data: { ...n.data } }));
+      await runPipeline(snapshot, edges, {
+        onStatus: (id, status, message) => {
+          setNodes(nds =>
+            nds.map(n =>
+              n.id === id ? { ...n, data: { ...n.data, status, error: message } } : n,
+            ),
+          );
+        },
+        onResult: (id, result) => {
+          setNodes(nds =>
+            nds.map(n => (n.id === id ? { ...n, data: { ...n.data, result } } : n)),
+          );
+        },
+      });
+      pushToast('Pipeline run complete.', 'success');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Pipeline run failed.';
+      pushToast(message, 'error');
     } finally {
       setIsRunning(false);
     }
@@ -203,20 +292,27 @@ function Orchestrator() {
 
   return (
     <div className="flex flex-col h-screen bg-bg text-text-main overflow-hidden font-sans">
-      <TopBar 
-        onAutoOrchestrate={handleAutoOrchestrate} 
-        isGenerating={isGenerating} 
-        onRunPipeline={runPipeline}
+      <TopBar
+        onAutoOrchestrate={handleAutoOrchestrate}
+        isGenerating={isGenerating}
+        onRunPipeline={runPipelineHandler}
         isRunning={isRunning}
+        onSave={handleSave}
+        onClear={handleClear}
+        onExport={handleExport}
+        onImport={handleImport}
       />
-      
+
       <div className="flex flex-1 relative z-10 overflow-hidden">
         <Sidebar />
-        
-        <main className="flex-1 relative bg-[radial-gradient(circle_at_50%_50%,#111_0%,#050505_100%)]" ref={reactFlowWrapper}>
+
+        <main
+          className="flex-1 relative bg-[radial-gradient(circle_at_50%_50%,#111_0%,#050505_100%)]"
+          ref={reactFlowWrapper}
+        >
           <div className="absolute top-10 left-10 pointer-events-none z-10">
             <h1 className="text-[64px] font-extrabold leading-[0.9] tracking-[-2px]">
-              CROSS-MODEL<br/>SEQUENCER
+              CROSS-MODEL<br />SEQUENCER
             </h1>
           </div>
           <ReactFlow
@@ -227,26 +323,45 @@ function Orchestrator() {
             onConnect={onConnect}
             onDrop={onDrop}
             onDragOver={onDragOver}
+            onNodeClick={(_, node) => setSelectedNodeId(node.id)}
+            onPaneClick={() => setSelectedNodeId(null)}
             nodeTypes={nodeTypes}
+            deleteKeyCode={['Delete', 'Backspace']}
             fitView
             className="bg-transparent"
           >
-            <Background color="#ffffff" gap={24} size={1} opacity={0.05} />
+            <Background color="#ffffff" gap={24} size={1} />
             <Controls className="bg-surface border border-border fill-text-main" />
+            <MiniMap
+              pannable
+              zoomable
+              maskColor="rgba(5,5,5,0.85)"
+              nodeColor={() => '#E0FF2E'}
+              className="!bg-surface !border !border-border"
+            />
           </ReactFlow>
         </main>
 
-        <ChatPanel />
+        <SidePanel
+          selectedNode={selectedNode}
+          onPatchNode={patchNode}
+          onDeleteNode={deleteNode}
+        />
       </div>
 
       <footer className="h-[60px] border-t border-border bg-bg flex items-center justify-between px-10 text-[11px] text-text-dim z-20">
         <div className="flex gap-5">
-          <span className="flex items-center"><span className="inline-block w-2 h-2 bg-accent rounded-full mr-1.5"></span>MCP ACTIVE</span>
-          <span>LATENCY: 14MS</span>
-          <span>COST: $0.12/JOB</span>
+          <span className="flex items-center">
+            <span className={`inline-block w-2 h-2 rounded-full mr-1.5 ${HAS_API_KEY ? 'bg-accent' : 'bg-red-500'}`} />
+            {HAS_API_KEY ? 'MCP ACTIVE' : 'API KEY MISSING'}
+          </span>
+          <span>NODES: {nodes.length}</span>
+          <span>EDGES: {edges.length}</span>
         </div>
         <div>SESSION ID: X-992-ALPHA-ORCH</div>
       </footer>
+
+      <ToastStack toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }
