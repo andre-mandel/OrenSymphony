@@ -1,15 +1,29 @@
-import React, { useState } from 'react';
-import { Network, Wand2, Play, Loader2 } from 'lucide-react';
+import React, { useRef, useState } from 'react';
+import { Wand2, Play, Loader2, Save, Upload, Download, Trash } from 'lucide-react';
 
 interface TopBarProps {
   onAutoOrchestrate: (prompt: string) => void;
   isGenerating: boolean;
   onRunPipeline: () => void;
   isRunning: boolean;
+  onSave: () => void;
+  onClear: () => void;
+  onExport: () => void;
+  onImport: (file: File) => void;
 }
 
-export function TopBar({ onAutoOrchestrate, isGenerating, onRunPipeline, isRunning }: TopBarProps) {
+export function TopBar({
+  onAutoOrchestrate,
+  isGenerating,
+  onRunPipeline,
+  isRunning,
+  onSave,
+  onClear,
+  onExport,
+  onImport,
+}: TopBarProps) {
   const [prompt, setPrompt] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -19,15 +33,21 @@ export function TopBar({ onAutoOrchestrate, isGenerating, onRunPipeline, isRunni
     }
   };
 
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) onImport(file);
+    e.target.value = '';
+  };
+
   return (
-    <header className="h-20 border-b border-border bg-bg flex items-center justify-between px-10 z-10 relative">
-      <div className="flex items-center gap-3">
+    <header className="h-20 border-b border-border bg-bg flex items-center justify-between px-8 z-10 relative gap-4">
+      <div className="flex items-center gap-3 flex-shrink-0">
         <div className="text-2xl font-black tracking-tighter uppercase">
           Oren<span className="text-accent">Symphony</span>
         </div>
       </div>
 
-      <div className="flex-1 max-w-2xl mx-8">
+      <div className="flex-1 max-w-2xl">
         <form onSubmit={handleSubmit} className="relative group">
           <div className="relative flex items-center">
             <Wand2 className="absolute left-4 w-4 h-4 text-text-dim" />
@@ -35,7 +55,7 @@ export function TopBar({ onAutoOrchestrate, isGenerating, onRunPipeline, isRunni
               type="text"
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder="Describe a task to auto-orchestrate..."
+              placeholder="Describe a task to auto-orchestrate…"
               className="w-full bg-surface border border-border rounded pl-11 pr-32 py-2.5 text-sm text-text-main placeholder:text-text-dim focus:outline-none focus:border-accent transition-all"
             />
             <button
@@ -50,14 +70,24 @@ export function TopBar({ onAutoOrchestrate, isGenerating, onRunPipeline, isRunni
         </form>
       </div>
 
-      <div className="flex items-center gap-4">
-        <div className="text-[10px] uppercase tracking-widest bg-surface px-3 py-1.5 border border-border rounded text-accent">
-          ● System Evolving
-        </div>
+      <div className="flex items-center gap-2 flex-shrink-0">
+        <IconBtn title="Save to browser" onClick={onSave}><Save className="w-4 h-4" /></IconBtn>
+        <IconBtn title="Export pipeline JSON" onClick={onExport}><Download className="w-4 h-4" /></IconBtn>
+        <IconBtn title="Import pipeline JSON" onClick={() => fileInputRef.current?.click()}>
+          <Upload className="w-4 h-4" />
+        </IconBtn>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="application/json,.json"
+          className="hidden"
+          onChange={handleFile}
+        />
+        <IconBtn title="Clear canvas" onClick={onClear}><Trash className="w-4 h-4" /></IconBtn>
         <button
           onClick={onRunPipeline}
           disabled={isRunning}
-          className="flex items-center gap-2 px-5 py-2 bg-accent text-bg font-bold text-sm rounded transition-all disabled:opacity-50"
+          className="flex items-center gap-2 px-5 py-2 bg-accent text-bg font-bold text-sm rounded transition-all disabled:opacity-50 hover:opacity-90 ml-2"
         >
           {isRunning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
           Run Pipeline
@@ -67,11 +97,24 @@ export function TopBar({ onAutoOrchestrate, isGenerating, onRunPipeline, isRunni
   );
 }
 
+function IconBtn({ title, onClick, children }: { title: string; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      aria-label={title}
+      className="p-2 bg-surface border border-border text-text-dim hover:text-accent hover:border-accent rounded transition-colors"
+    >
+      {children}
+    </button>
+  );
+}
+
 function SparklesIcon() {
   return (
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>
-      <path d="M5 3v4"/><path d="M19 17v4"/><path d="M3 5h4"/><path d="M17 19h4"/>
+      <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+      <path d="M5 3v4" /><path d="M19 17v4" /><path d="M3 5h4" /><path d="M17 19h4" />
     </svg>
   );
 }
