@@ -1,7 +1,7 @@
 import React from 'react';
 import type { Node } from '@xyflow/react';
 import { Trash2 } from 'lucide-react';
-import { AVAILABLE_MODELS } from '../lib/models';
+import { useModels } from '../lib/registry';
 
 interface InspectorProps {
   node: Node | null;
@@ -20,6 +20,8 @@ interface NodeData {
 }
 
 export function Inspector({ node, onPatch, onDelete }: InspectorProps) {
+  const { data: models } = useModels();
+
   if (!node) {
     return (
       <div className="text-text-dim text-xs italic leading-relaxed">
@@ -30,16 +32,13 @@ export function Inspector({ node, onPatch, onDelete }: InspectorProps) {
   }
   const data = (node.data ?? {}) as NodeData;
   const kind = node.type === 'inputNode' ? 'Input' : node.type === 'outputNode' ? 'Output' : 'Model step';
+  const enabledModels = models.filter(m => m.enabled);
 
   return (
     <div className="space-y-3 text-sm">
       <div className="flex items-center justify-between">
         <div className="text-[10px] uppercase font-bold tracking-widest text-text-dim">{kind}</div>
-        <button
-          onClick={() => onDelete(node.id)}
-          title="Delete node"
-          className="text-text-dim hover:text-accent transition-colors"
-        >
+        <button onClick={() => onDelete(node.id)} title="Delete node" className="text-text-dim hover:text-accent transition-colors">
           <Trash2 className="w-3.5 h-3.5" />
         </button>
       </div>
@@ -71,9 +70,11 @@ export function Inspector({ node, onPatch, onDelete }: InspectorProps) {
               onChange={(e) => onPatch(node.id, { model: e.target.value })}
               className="w-full bg-surface border border-border rounded px-2 py-1.5 text-xs text-text-main focus:outline-none focus:border-accent"
             >
-              <option value="" disabled>Choose a model…</option>
-              {AVAILABLE_MODELS.map(m => (
-                <option key={m.id} value={m.id}>{m.name}{m.native ? '' : ' (proxied)'}</option>
+              <option value="">Auto (smart route at run time)</option>
+              {enabledModels.map(m => (
+                <option key={m.id} value={m.model_id}>
+                  {m.display_name} · {m.provider_name}
+                </option>
               ))}
             </select>
           </Field>

@@ -1,5 +1,5 @@
 import type { Edge, Node } from '@xyflow/react';
-import { executeTextModel, generateImage } from './gemini';
+import { executeText, executeImage, pickRoute } from './calls';
 
 export type RunStatus = 'idle' | 'running' | 'completed' | 'error';
 
@@ -55,6 +55,11 @@ function joinInputs(values: string[]): string {
   return filtered.map((v, i) => `--- Source ${i + 1} ---\n${v}`).join('\n\n');
 }
 
+function looksLikeImageRequest(prompt: string, inputData: string): boolean {
+  const blob = `${prompt}\n${inputData}`.toLowerCase();
+  return /\b(image|render|illustrat|logo|photo|picture|portrait|poster|generate.*(an? )?(image|photo|picture))\b/.test(blob);
+}
+
 export async function runPipeline(
   nodes: Node[],
   edges: Edge[],
@@ -84,16 +89,26 @@ export async function runPipeline(
       if (node.type === 'modelNode') {
         hooks.onStart?.(node.id);
         hooks.onStatus(node.id, 'running');
-        const model = data.model || 'gemini-3-flash-preview';
+        let modelId = data.model || '';
         const prompt = data.prompt || '';
+
+        if (!modelId) {
+          const decision = await pickRoute(`${prompt}\n\n${inputData}`.trim(), {
+            needs_image_gen: looksLikeImageRequest(prompt, inputData),
+          });
+          if (!decision.model_id) throw new Error('Smart router found no enabled models.');
+          modelId = decision.model_id;
+        }
+
         let result = '';
-        if (model === 'gemini-3.1-flash-image-preview') {
+        if (looksLikeImageRequest(prompt, inputData) && /image|imagen|dalle|flux/.test(modelId.toLowerCase())) {
           const composite = [prompt, inputData].filter(Boolean).join('\n\n');
-          const img = await generateImage(composite);
+          const img = await executeImage(modelId, composite);
           result = img ?? '';
           if (!result) throw new Error('Image generation returned no data.');
         } else {
-          result = await executeTextModel(model, prompt, inputData);
+          const out = await executeText({ modelId, prompt, inputData });
+          result = out.text;
         }
         outputs.set(node.id, result);
         hooks.onResult(node.id, result);
