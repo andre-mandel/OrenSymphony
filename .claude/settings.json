@@ -1,0 +1,9 @@
+{
+  "sandbox": {
+    "network": {
+      "allowedDomains": [
+        "backoffice.orengen.io"
+      ]
+    }
+  }
+}
