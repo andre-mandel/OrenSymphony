@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { Wand2, Play, Loader2, Save, Upload, Download, Trash } from 'lucide-react';
+import { Wand2, Play, Loader2, Save, Upload, Download, Trash, Settings as SettingsIcon } from 'lucide-react';
 
 interface TopBarProps {
   onAutoOrchestrate: (prompt: string) => void;
@@ -10,6 +10,7 @@ interface TopBarProps {
   onClear: () => void;
   onExport: () => void;
   onImport: (file: File) => void;
+  onOpenSettings: () => void;
 }
 
 export function TopBar({
@@ -21,6 +22,7 @@ export function TopBar({
   onClear,
   onExport,
   onImport,
+  onOpenSettings,
 }: TopBarProps) {
   const [prompt, setPrompt] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -84,6 +86,7 @@ export function TopBar({
           onChange={handleFile}
         />
         <IconBtn title="Clear canvas" onClick={onClear}><Trash className="w-4 h-4" /></IconBtn>
+        <IconBtn title="Settings" onClick={onOpenSettings}><SettingsIcon className="w-4 h-4" /></IconBtn>
         <button
           onClick={onRunPipeline}
           disabled={isRunning}

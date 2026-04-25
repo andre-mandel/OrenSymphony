@@ -14,7 +14,12 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { v4 as uuidv4 } from 'uuid';
+import { Settings as SettingsIcon } from 'lucide-react';
 
+import { AuthProvider } from './lib/auth';
+import { AuthGate } from './components/AuthGate';
+import { Settings } from './components/Settings';
+import { useModels, useMcpTools } from './lib/registry';
 import { TopBar } from './components/TopBar';
 import { Sidebar } from './components/Sidebar';
 import { SidePanel } from './components/SidePanel';
@@ -22,7 +27,7 @@ import { ToastStack, type ToastMessage, type ToastTone } from './components/Toas
 import { ModelNode } from './components/nodes/ModelNode';
 import { InputNode } from './components/nodes/InputNode';
 import { OutputNode } from './components/nodes/OutputNode';
-import { generatePipeline, HAS_API_KEY } from './lib/gemini';
+import { generatePipeline } from './lib/calls';
 import { runPipeline, type RunStatus } from './lib/pipeline';
 import {
   persistPipeline,
@@ -51,7 +56,7 @@ const initialNodes: Node[] = [
     position: { x: 350, y: 200 },
     data: {
       label: 'Story Writer',
-      model: 'gemini-3.1-pro-preview',
+      model: '',
       prompt: 'You are a creative writer. Write a 2-paragraph story based on the input.',
     },
   },
@@ -83,6 +88,12 @@ function Orchestrator() {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [hydrated, setHydrated] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  const { data: models } = useModels();
+  const { data: mcpTools } = useMcpTools();
+  const enabledModelCount = models.filter(m => m.enabled).length;
+  const noModels = enabledModelCount === 0;
 
   const pushToast = useCallback((text: string, tone: ToastTone = 'info') => {
     setToasts(prev => [...prev, { id: uuidv4(), text, tone }]);
@@ -91,7 +102,6 @@ function Orchestrator() {
     setToasts(prev => prev.filter(t => t.id !== id));
   }, []);
 
-  // Hydrate from localStorage once.
   useEffect(() => {
     const saved = loadPersistedPipeline();
     if (saved && saved.nodes.length > 0) {
@@ -99,17 +109,17 @@ function Orchestrator() {
       setEdges(saved.edges);
       pushToast('Restored your last pipeline from this browser.', 'info');
     }
-    if (!HAS_API_KEY) {
-      pushToast(
-        'GEMINI_API_KEY is not set. Add it to .env.local and restart `npm run dev` to enable model calls.',
-        'error',
-      );
-    }
     setHydrated(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Auto-persist after hydration.
+  useEffect(() => {
+    if (hydrated && noModels && !settingsOpen) {
+      pushToast('No models registered yet. Open Settings to add a provider.', 'info');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydrated, noModels]);
+
   useEffect(() => {
     if (!hydrated) return;
     const handle = setTimeout(() => persistPipeline(nodes, edges), 300);
@@ -151,7 +161,7 @@ function Orchestrator() {
       } else {
         data = {
           label: modelName || 'New Step',
-          model: modelId || 'gemini-3-flash-preview',
+          model: modelId || '',
           prompt: DEFAULT_PROMPTS[type] ?? '',
         };
       }
@@ -251,8 +261,6 @@ function Orchestrator() {
   const runPipelineHandler = async () => {
     if (isRunning) return;
     setIsRunning(true);
-
-    // Reset volatile state.
     setNodes(nds =>
       nds.map(n => {
         if (n.type === 'modelNode') {
@@ -264,15 +272,12 @@ function Orchestrator() {
         return n;
       }),
     );
-
     try {
       const snapshot = nodes.map(n => ({ ...n, data: { ...n.data } }));
       await runPipeline(snapshot, edges, {
         onStatus: (id, status, message) => {
           setNodes(nds =>
-            nds.map(n =>
-              n.id === id ? { ...n, data: { ...n.data, status, error: message } } : n,
-            ),
+            nds.map(n => (n.id === id ? { ...n, data: { ...n.data, status, error: message } } : n)),
           );
         },
         onResult: (id, result) => {
@@ -301,10 +306,11 @@ function Orchestrator() {
         onClear={handleClear}
         onExport={handleExport}
         onImport={handleImport}
+        onOpenSettings={() => setSettingsOpen(true)}
       />
 
       <div className="flex flex-1 relative z-10 overflow-hidden">
-        <Sidebar />
+        <Sidebar onOpenSettings={() => setSettingsOpen(true)} />
 
         <main
           className="flex-1 relative bg-[radial-gradient(circle_at_50%_50%,#111_0%,#050505_100%)]"
@@ -352,24 +358,32 @@ function Orchestrator() {
       <footer className="h-[60px] border-t border-border bg-bg flex items-center justify-between px-10 text-[11px] text-text-dim z-20">
         <div className="flex gap-5">
           <span className="flex items-center">
-            <span className={`inline-block w-2 h-2 rounded-full mr-1.5 ${HAS_API_KEY ? 'bg-accent' : 'bg-red-500'}`} />
-            {HAS_API_KEY ? 'MCP ACTIVE' : 'API KEY MISSING'}
+            <span className={`inline-block w-2 h-2 rounded-full mr-1.5 ${noModels ? 'bg-red-500' : 'bg-accent'}`} />
+            {noModels ? 'NO MODELS' : `${enabledModelCount} MODEL${enabledModelCount === 1 ? '' : 'S'}`}
           </span>
+          <span>MCP TOOLS: {mcpTools.length}</span>
           <span>NODES: {nodes.length}</span>
           <span>EDGES: {edges.length}</span>
         </div>
-        <div>SESSION ID: X-992-ALPHA-ORCH</div>
+        <button onClick={() => setSettingsOpen(true)} className="flex items-center gap-1.5 hover:text-accent transition-colors">
+          <SettingsIcon className="w-3 h-3" /> Settings
+        </button>
       </footer>
 
       <ToastStack toasts={toasts} onDismiss={dismissToast} />
+      {settingsOpen && <Settings onClose={() => setSettingsOpen(false)} />}
     </div>
   );
 }
 
 export default function App() {
   return (
-    <ReactFlowProvider>
-      <Orchestrator />
-    </ReactFlowProvider>
+    <AuthProvider>
+      <AuthGate>
+        <ReactFlowProvider>
+          <Orchestrator />
+        </ReactFlowProvider>
+      </AuthGate>
+    </AuthProvider>
   );
 }
